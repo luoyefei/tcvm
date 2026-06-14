@@ -1,0 +1,11 @@
+# TCVM Configuration Example
+# Copy this file to ~/.tcvm/config.yaml and fill in your credentials.
+# WARNING: Never commit this file with real credentials to version control!
+
+secret_id: <YOUR_TENCENT_SECRET_ID>
+secret_key: <YOUR_TENCENT_SECRET_KEY>
+region: ap-***
+
+# Optional: COS bucket for large file transfers
+# cos_bucket: mybucket-1250000000
+# cos_region: ap-guangzhou
