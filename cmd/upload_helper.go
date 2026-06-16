@@ -64,7 +64,8 @@ func uploadViaCOS(ctx context.Context, instanceId string, localPath, remotePath 
 
 	fmt.Fprintf(os.Stderr, "Downloading to instance %s... ", instanceId)
 
-	downloadCmd := fmt.Sprintf(`wget -q -O %s "%s" 2>/dev/null || curl -sL -o %s "%s"`, remotePath, url, remotePath, url)
+	quotedRemote := shellQuote(remotePath)
+	downloadCmd := fmt.Sprintf(`wget -q -O %s "%s" 2>/dev/null || curl -sL -o %s "%s"`, quotedRemote, url, quotedRemote, url)
 	invocationId, err := tatClient.RunCommand(ctx, []string{instanceId}, downloadCmd, "SHELL")
 	if err != nil {
 		_ = cosClient.DeleteObject(ctx, cosKey)
@@ -84,7 +85,7 @@ func uploadViaCOS(ctx context.Context, instanceId string, localPath, remotePath 
 	fmt.Fprintln(os.Stderr, "done.")
 
 	fmt.Fprintf(os.Stderr, "Verifying MD5... ")
-	md5Cmd := fmt.Sprintf("md5sum %s | awk '{print $1}'", remotePath)
+	md5Cmd := fmt.Sprintf("md5sum %s | awk '{print $1}'", quotedRemote)
 	invocationId, err = tatClient.RunCommand(ctx, []string{instanceId}, md5Cmd, "SHELL")
 	if err != nil {
 		_ = cosClient.DeleteObject(ctx, cosKey)

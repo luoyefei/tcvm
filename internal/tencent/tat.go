@@ -137,17 +137,16 @@ func (t *TATClient) UploadFile(ctx context.Context, instanceId string, fileConte
 	request := tat.NewRunCommandRequest()
 
 	encodedContent := base64.StdEncoding.EncodeToString(fileContent)
-	script := fmt.Sprintf(`cat << 'EOF' | base64 -d > %s
-%s
-EOF`, remotePath, encodedContent)
+	quotedPath := shellQuoteSingle(remotePath)
+	var script string
 	if overwrite {
 		script = fmt.Sprintf(`cat << 'EOF' | base64 -d > %s
 %s
-EOF`, remotePath, encodedContent)
+EOF`, quotedPath, encodedContent)
 	} else {
 		script = fmt.Sprintf(`[ -f %s ] || cat << 'EOF' | base64 -d > %s
 %s
-EOF`, remotePath, remotePath, encodedContent)
+EOF`, quotedPath, quotedPath, encodedContent)
 	}
 
 	request.Content = stringPtr(base64.StdEncoding.EncodeToString([]byte(script)))

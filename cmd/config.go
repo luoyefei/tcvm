@@ -37,11 +37,11 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	}
 
 	var (
-		secretId   string
-		secretKey  string
-		region     string
-		cosBucket  string
-		cosRegion  string
+		secretId  string
+		secretKey string
+		region    string
+		cosBucket string
+		cosRegion string
 	)
 
 	if config.AppConfig.SecretId != "" {

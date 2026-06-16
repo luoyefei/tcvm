@@ -4,16 +4,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
 
+// envKeys are the config fields that can be overridden via TCVM_* environment
+// variables. They must be bound explicitly: viper.AutomaticEnv alone does not
+// add keys to AllKeys(), so viper.Unmarshal would otherwise ignore them when no
+// config file is present.
+var envKeys = []string{"secret_id", "secret_key", "region", "cos_bucket", "cos_region"}
+
 type Config struct {
-	SecretId   string `mapstructure:"secret_id"`
-	SecretKey  string `mapstructure:"secret_key"`
-	Region     string `mapstructure:"region"`
-	CosBucket  string `mapstructure:"cos_bucket"`
-	CosRegion  string `mapstructure:"cos_region"`
+	SecretId  string `mapstructure:"secret_id"`
+	SecretKey string `mapstructure:"secret_key"`
+	Region    string `mapstructure:"region"`
+	CosBucket string `mapstructure:"cos_bucket"`
+	CosRegion string `mapstructure:"cos_region"`
 }
 
 var (
@@ -39,7 +46,11 @@ func InitConfig() error {
 	}
 
 	viper.SetEnvPrefix("TCVM")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
+	for _, key := range envKeys {
+		_ = viper.BindEnv(key)
+	}
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

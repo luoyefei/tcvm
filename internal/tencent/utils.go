@@ -1,5 +1,13 @@
 package tencent
 
+import "strings"
+
+// shellQuoteSingle wraps s in single quotes for safe embedding in a shell
+// command, escaping any embedded single quotes.
+func shellQuoteSingle(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func stringPtr(s string) *string {
 	return &s
 }

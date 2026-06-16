@@ -102,7 +102,8 @@ TCVM - Tencent Cloud VM Manager
 [3] Execute command
 [4] Upload file
 [5] View tasks
-[6] Configure
+[6] VNC URL
+[7] Configure
 [h] Help
 [q] Quit
 ```
@@ -116,6 +117,7 @@ TCVM - Tencent Cloud VM Manager
 | `exec` | Execute a command via TAT | `./tcvm exec ins-xxx "df -h"` |
 | `upload` | Upload a file | `./tcvm upload ins-xxx ./file.txt /tmp/file.txt` |
 | `tasks` | Query command execution results | `./tcvm tasks inv-xxx` |
+| `vnc` | Get the VNC console URL | `./tcvm vnc ins-xxx` |
 | `config` | Configure credentials | `./tcvm config` |
 | `shell` | Start interactive shell (alias) | `./tcvm shell ins-xxx` |
 

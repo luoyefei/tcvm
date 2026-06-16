@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"tcvm/internal/config"
+	"tcvm/internal/tencent"
 	"text/tabwriter"
 	"time"
 
@@ -17,13 +18,13 @@ import (
 )
 
 var (
-	accentColor   = lipgloss.Color("#00D4AA")
-	primaryColor  = lipgloss.Color("#0A2540")
-	textColor     = lipgloss.Color("#E3E8EE")
-	dimColor      = lipgloss.Color("#6B7280")
-	successColor  = lipgloss.Color("#10B981")
-	warningColor  = lipgloss.Color("#F59E0B")
-	errorColor    = lipgloss.Color("#EF4444")
+	accentColor  = lipgloss.Color("#00D4AA")
+	primaryColor = lipgloss.Color("#0A2540")
+	textColor    = lipgloss.Color("#E3E8EE")
+	dimColor     = lipgloss.Color("#6B7280")
+	successColor = lipgloss.Color("#10B981")
+	warningColor = lipgloss.Color("#F59E0B")
+	errorColor   = lipgloss.Color("#EF4444")
 )
 
 var rootCmd = &cobra.Command{
@@ -198,7 +199,8 @@ func renderMenu() {
 		{"3", "Execute command"},
 		{"4", "Upload file"},
 		{"5", "View tasks"},
-		{"6", "Configure"},
+		{"6", "VNC URL"},
+		{"7", "Configure"},
 		{"h", "Help"},
 		{"q", "Quit"},
 	}
@@ -216,6 +218,18 @@ func renderMenu() {
 	fmt.Println(boxStyle.Render(content.String()))
 }
 
+// maskSecret renders a SecretId for display without leaking it, tolerating
+// short or empty values that would otherwise panic on slicing.
+func maskSecret(id string) string {
+	if id == "" {
+		return "(unset)"
+	}
+	if len(id) <= 12 {
+		return strings.Repeat("*", len(id))
+	}
+	return id[:8] + "***" + id[len(id)-4:]
+}
+
 func renderStatusBar() {
 	barStyle := lipgloss.NewStyle().
 		Background(primaryColor).
@@ -228,10 +242,9 @@ func renderStatusBar() {
 		region = regionFlag
 	}
 
-	status := fmt.Sprintf("  Region: %s  |  Auth: %s***%s",
+	status := fmt.Sprintf("  Region: %s  |  Auth: %s",
 		lipgloss.NewStyle().Foreground(accentColor).Render(region),
-		config.AppConfig.SecretId[:8],
-		config.AppConfig.SecretId[len(config.AppConfig.SecretId)-4:],
+		maskSecret(config.AppConfig.SecretId),
 	)
 
 	fmt.Println(barStyle.Render(status))
@@ -293,7 +306,11 @@ func runWorkbench(cmd *cobra.Command, args []string) error {
 			if err := workbenchTasks(reader); err != nil {
 				renderError(err)
 			}
-		case "6", "config":
+		case "6", "vnc":
+			if err := workbenchVNC(reader); err != nil {
+				renderError(err)
+			}
+		case "7", "config":
 			if err := runConfig(nil, nil); err != nil {
 				renderError(err)
 			}
@@ -325,18 +342,52 @@ func renderSuccess(msg string) {
 	fmt.Println()
 }
 
-func workbenchList() error {
+// listInstances fetches all instances once for reuse across menu actions.
+func listInstances() ([]tencent.Instance, error) {
 	client, err := newClient()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	cvmClient, err := client.CVM()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	instances, err := cvmClient.DescribeInstances(context.Background(), nil, "")
+	return cvmClient.DescribeInstances(context.Background(), nil, "")
+}
+
+// selectInstance lists instances, prompts for a number, and returns the choice.
+// It fetches the instance list only once.
+func selectInstance(reader *bufio.Reader, action string) (tencent.Instance, error) {
+	instances, err := listInstances()
+	if err != nil {
+		return tencent.Instance{}, err
+	}
+	if len(instances) == 0 {
+		return tencent.Instance{}, fmt.Errorf("no instances found")
+	}
+	printInstances(instances)
+
+	promptStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+	fmt.Print(promptStyle.Render(fmt.Sprintf("  Select instance to %s (number): ", action)))
+
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return tencent.Instance{}, err
+	}
+	idx, err := strconv.Atoi(strings.TrimSpace(input))
+	if err != nil {
+		return tencent.Instance{}, fmt.Errorf("invalid number")
+	}
+	if idx < 1 || idx > len(instances) {
+		return tencent.Instance{}, fmt.Errorf("invalid selection")
+	}
+	return instances[idx-1], nil
+}
+
+func workbenchList() error {
+	instances, err := listInstances()
 	if err != nil {
 		return err
 	}
@@ -347,7 +398,11 @@ func workbenchList() error {
 		fmt.Println()
 		return nil
 	}
+	printInstances(instances)
+	return nil
+}
 
+func printInstances(instances []tencent.Instance) {
 	titleStyle := lipgloss.NewStyle().
 		Foreground(accentColor).
 		Bold(true).
@@ -377,105 +432,46 @@ func workbenchList() error {
 	}
 	w.Flush()
 	fmt.Println()
-	return nil
 }
 
 func workbenchConnect(reader *bufio.Reader) error {
-	if err := workbenchList(); err != nil {
-		return err
-	}
-
-	promptStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	fmt.Print(promptStyle.Render("  Select instance to connect (number): "))
-
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		return nil
-	}
-
-	idx, err := strconv.Atoi(strings.TrimSpace(input))
-	if err != nil {
-		return fmt.Errorf("invalid number")
-	}
-
-	client, err := newClient()
+	selected, err := selectInstance(reader, "connect")
 	if err != nil {
 		return err
 	}
 
-	cvmClient, err := client.CVM()
-	if err != nil {
-		return err
-	}
-
-	instances, err := cvmClient.DescribeInstances(context.Background(), nil, "")
-	if err != nil {
-		return err
-	}
-
-	if idx < 1 || idx > len(instances) {
-		return fmt.Errorf("invalid selection")
-	}
-
-	selected := instances[idx-1]
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Foreground(dimColor).PaddingLeft(2).Render(
 		fmt.Sprintf("Connecting to %s (%s)...", selected.InstanceId, selected.InstanceName)))
 	fmt.Println()
 
+	client, err := newClient()
+	if err != nil {
+		return err
+	}
 	tatClient, err := client.TAT()
 	if err != nil {
 		return err
 	}
 
-	session := &connectSession{
+	session := &pseudoSession{
 		instanceId: selected.InstanceId,
 		cwd:        "/root",
 		timeout:    60 * time.Second,
+		reader:     reader,
 	}
 
-	return session.runInteractive(tatClient, reader)
+	return session.runInteractive(tatClient)
 }
 
 func workbenchExec(reader *bufio.Reader) error {
-	if err := workbenchList(); err != nil {
+	selected, err := selectInstance(reader, "run command on")
+	if err != nil {
 		return err
 	}
+	instanceId := selected.InstanceId
 
 	promptStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	fmt.Print(promptStyle.Render("  Select instance (number): "))
-
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		return nil
-	}
-
-	idx, err := strconv.Atoi(strings.TrimSpace(input))
-	if err != nil {
-		return fmt.Errorf("invalid number")
-	}
-
-	client, err := newClient()
-	if err != nil {
-		return err
-	}
-
-	cvmClient, err := client.CVM()
-	if err != nil {
-		return err
-	}
-
-	instances, err := cvmClient.DescribeInstances(context.Background(), nil, "")
-	if err != nil {
-		return err
-	}
-
-	if idx < 1 || idx > len(instances) {
-		return fmt.Errorf("invalid selection")
-	}
-
-	instanceId := instances[idx-1].InstanceId
-
 	fmt.Print(promptStyle.Render("  Command to execute: "))
 	cmdInput, err := reader.ReadString('\n')
 	if err != nil {
@@ -487,6 +483,10 @@ func workbenchExec(reader *bufio.Reader) error {
 		return fmt.Errorf("empty command")
 	}
 
+	client, err := newClient()
+	if err != nil {
+		return err
+	}
 	tatClient, err := client.TAT()
 	if err != nil {
 		return err
@@ -528,44 +528,13 @@ func workbenchExec(reader *bufio.Reader) error {
 }
 
 func workbenchUpload(reader *bufio.Reader) error {
-	if err := workbenchList(); err != nil {
+	selected, err := selectInstance(reader, "upload to")
+	if err != nil {
 		return err
 	}
+	instanceId := selected.InstanceId
 
 	promptStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	fmt.Print(promptStyle.Render("  Select instance (number): "))
-
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		return nil
-	}
-
-	idx, err := strconv.Atoi(strings.TrimSpace(input))
-	if err != nil {
-		return fmt.Errorf("invalid number")
-	}
-
-	client, err := newClient()
-	if err != nil {
-		return err
-	}
-
-	cvmClient, err := client.CVM()
-	if err != nil {
-		return err
-	}
-
-	instances, err := cvmClient.DescribeInstances(context.Background(), nil, "")
-	if err != nil {
-		return err
-	}
-
-	if idx < 1 || idx > len(instances) {
-		return fmt.Errorf("invalid selection")
-	}
-
-	instanceId := instances[idx-1].InstanceId
-
 	fmt.Print(promptStyle.Render("  Local file path: "))
 	localInput, err := reader.ReadString('\n')
 	if err != nil {
@@ -580,6 +549,10 @@ func workbenchUpload(reader *bufio.Reader) error {
 	}
 	remotePath := strings.TrimSpace(remoteInput)
 
+	client, err := newClient()
+	if err != nil {
+		return err
+	}
 	tatClient, err := client.TAT()
 	if err != nil {
 		return err
@@ -590,6 +563,34 @@ func workbenchUpload(reader *bufio.Reader) error {
 	}
 
 	return uploadFile(context.Background(), instanceId, localPath, remotePath, tatClient, onStatus)
+}
+
+func workbenchVNC(reader *bufio.Reader) error {
+	selected, err := selectInstance(reader, "get VNC URL for")
+	if err != nil {
+		return err
+	}
+
+	client, err := newClient()
+	if err != nil {
+		return err
+	}
+	cvmClient, err := client.CVM()
+	if err != nil {
+		return err
+	}
+
+	url, err := cvmClient.GetVncUrl(context.Background(), selected.InstanceId)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Foreground(dimColor).PaddingLeft(2).Render(
+		fmt.Sprintf("VNC URL for %s (%s):", selected.InstanceId, selected.InstanceName)))
+	fmt.Println(lipgloss.NewStyle().Foreground(accentColor).PaddingLeft(2).Render(url))
+	fmt.Println()
+	return nil
 }
 
 func workbenchTasks(reader *bufio.Reader) error {
